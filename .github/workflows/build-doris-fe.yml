@@ -1,3 +1,6 @@
+# GitHub Actions Workflow for Building Doris FE Modules
+# 用于编译Apache Doris 3.1版本的fe-common和fe-core模块
+
 name: Build Doris FE Modules
 
 on:
@@ -46,7 +49,7 @@ jobs:
 
     - name: Check Doris build script options
       run: |
-        echo "=== Checking available build options ==="
+        echo "=== Checking Doris build environment ==="
         chmod +x build.sh
         echo "Build script ready -> continuing to build step"
 
@@ -57,6 +60,12 @@ jobs:
         ls -la fe/fe-core/ || echo "fe-core directory not found"
         echo "=== Current directory structure ==="
         find . -name "pom.xml" -path "*/fe/*" | head -10
+
+    - name: Install build dependencies
+      run: |
+        echo "Installing missing build tools..."
+        sudo apt-get update
+        sudo apt-get install -y byacc bison flex libssl-dev
 
     - name: Build FE modules only
       run: |
@@ -131,3 +140,15 @@ jobs:
         else
           echo "✅ All required artifacts found successfully!"
         fi
+
+# 使用说明：
+# 1. 将此文件保存到项目的 .github/workflows/ 目录下
+# 2. 在GitHub仓库的Actions页面手动触发构建
+# 3. 选择要构建的Doris版本（默认branch-3.1）
+# 4. 构建完成后在Artifacts中下载生成的jar包
+# 5. 下载后可用于本地Maven安装或部署到远程仓库
+
+# 注意：
+# - 此workflow针对Doris 3.1版本优化
+# - 内存使用已优化为4GB上限，适合GitHub Actions标准runner
+# - 产物保留90天，可随时下载使用
