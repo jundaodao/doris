@@ -1,0 +1,53 @@
+name: Build Doris FE Modules
+
+on:
+  workflow_dispatch:
+    inputs:
+      doris-version:
+        description: 'Doris Branch Version'
+        required: true
+        default: 'branch-3.1'
+        type: choice
+        options:
+          - branch-3.1
+          - branch-3.0
+          - branch-2.1
+
+jobs:
+  build-fe:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java-version: [17]
+
+    steps:
+    - name: Checkout Apache Doris repository
+      uses: actions/checkout@v4
+      with:
+        repository: apache/doris
+        ref: ${{ github.event.inputs.doris-version || 'branch-3.1' }}
+        submodules: recursive
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ matrix.java-version }}
+        distribution: 'temurin'
+
+    - name: Build thirdparty dependencies
+      run: |
+        chmod +x build.sh
+        ./build.sh --thirdparty
+
+    - name: Build FE modules only
+      run: |
+        JAVA_OPTS="-Xmx4g -Xms2g" ./build.sh --fe -j1 -DskipTests=true
+
+    - name: Upload FE artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: doris-fe-${{ github.event.inputs.doris-version || '3.1' }}
+        path: |
+          **/fe-common/target/*.jar
+          **/fe-core/target/*.jar
+        retention-days: 90
