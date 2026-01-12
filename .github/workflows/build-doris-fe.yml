@@ -1,6 +1,7 @@
-name: Build Doris FE Modules
+ame: Build Doris FE Modules
 
 on:
+  # 允许手动触发构建
   workflow_dispatch:
     inputs:
       doris-version:
@@ -12,9 +13,15 @@ on:
           - branch-3.1
           - branch-3.0
           - branch-2.1
+  # 也可配置自动触发（可选）
+  # push:
+  #   branches: [ main, master ]
+  # pull_request:
+  #   branches: [ main, master ]
 
 jobs:
   build-fe:
+    name: Build Doris FE Modules
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -28,26 +35,99 @@ jobs:
         ref: ${{ github.event.inputs.doris-version || 'branch-3.1' }}
         submodules: recursive
 
-    - name: Setup Java
+    - name: Setup Java ${{ matrix.java-version }}
       uses: actions/setup-java@v4
       with:
         java-version: ${{ matrix.java-version }}
         distribution: 'temurin'
 
-    - name: Build thirdparty dependencies
+    - name: Check Java version
+      run: java -version
+
+    - name: Check Doris build script options
       run: |
+        echo "=== Checking available build options ==="
         chmod +x build.sh
-        ./build.sh --thirdparty
+        ./build.sh --help
+
+    - name: Validate FE module directories
+      run: |
+        echo "=== Checking FE module structure ==="
+        ls -la fe/fe-common/ || echo "fe-common directory not found"
+        ls -la fe/fe-core/ || echo "fe-core directory not found"
+        echo "=== Current directory structure ==="
+        find . -name "pom.xml" -path "*/fe/*" | head -10
 
     - name: Build FE modules only
       run: |
-        JAVA_OPTS="-Xmx4g -Xms2g" ./build.sh --fe -j1 -DskipTests=true
+        echo "Building FE modules with optimized settings..."
+        JAVA_OPTS="-Xmx4g -Xms2g" ./build.sh --fe --clean
+
+    - name: Find and list FE artifact files
+      run: |
+        echo "=== Generated FE Artifacts ==="
+        find . -name "*.jar" -path "*/fe-common/*" -o -name "*.jar" -path "*/fe-core/*" | head -20
+
+        echo "=== FE module target directories ==="
+        find . -path "*/fe-common/target" -type d | head -5
+        find . -path "*/fe-core/target" -type d | head -5
 
     - name: Upload FE artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: doris-fe-${{ github.event.inputs.doris-version || '3.1' }}
+        name: doris-fe-${{ github.event.inputs.doris-version || '3.1' }}-jars
         path: |
           **/fe-common/target/*.jar
           **/fe-core/target/*.jar
         retention-days: 90
+        if-no-files-found: error
+
+    - name: Upload build logs for debugging
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ github.event.inputs.doris-version || '3.1' }}
+        path: |
+          logs/
+          **/*.log
+        retention-days: 30
+        if-no-files-found: ignore
+
+  validate-artifacts:
+    name: Validate Generated Artifacts
+    runs-on: ubuntu-latest
+    needs: build-fe
+
+    steps:
+    - name: Download FE artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: doris-fe-${{ github.event.inputs.doris-version || '3.1' }}-jars
+
+    - name: Validate artifact contents
+      run: |
+        echo "=== Downloaded Artifacts ==="
+        find . -name "*.jar" -type f | while read file; do
+          echo "File: $file"
+          ls -lh "$file"
+          # 检查jar包基本信息
+          if command -v unzip >/dev/null 2>&1; then
+            unzip -l "$file" | head -5 | tail -3
+          else
+            echo "unzip not available, skipping content check"
+          fi
+          echo "---"
+        done
+
+        # 检查关键文件是否存在
+        fe_common_count=$(find . -name "*fe-common*.jar" | wc -l)
+        fe_core_count=$(find . -name "*fe-core*.jar" | wc -l)
+
+        echo "FE-Common JARs found: $fe_common_count"
+        echo "FE-Core JARs found: $fe_core_count"
+
+        if [ $fe_common_count -eq 0 ] || [ $fe_core_count -eq 0 ]; then
+          echo "❌ Required artifacts not found!"
+          exit 1
+        else
+          echo "✅ All required artifacts found successfully!"
+        fi
